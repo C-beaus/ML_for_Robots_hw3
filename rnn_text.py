@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torchtext
 import tqdm
+import pandas as pd
+import os
 
 from torchtext.data import get_tokenizer
 from torchtext.vocab import build_vocab_from_iterator
@@ -178,18 +180,46 @@ def initialize_weights(m):
 
 if __name__ == '__main__':
 
-    max_length = 256
+    max_length = 1000 #256
 
-    train_data, test_data = datasets.load_dataset("imdb", split=["train", "test"])
-    tokenizer = get_tokenizer("basic_english")
+    parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
+    psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
+    folder_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data"
+    file_name = "dubin_path"
+
+    df_params = pd.read_excel(parameters_path)
+    df_psi = pd.read_excel(psi_end_path)
+
+    # Convert from pandas dataframe to numpy array
+    parameters_data = df_params.values
+    psi_end_data = df_psi.values
+
+    # List to store the data from all files
+    dataframes = []
+
+    # Loop through all files in the folder
+    for name in os.listdir(folder_path):
+        # Check if the file contains the desired part of the name
+        if file_name in name and name.endswith('.xls'):  # Adjust extension if needed
+            # Build the full file path
+            file_path = os.path.join(folder_path, name)
+            
+            # Read the file and append the DataFrame to the list
+            df = pd.read_excel(file_path)
+            dataframes.append(df)
 
 
-    train_data = train_data.map(
-        tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
-    )
-    test_data = test_data.map(
-        tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
-    )
+
+    # train_data, test_data = datasets.load_dataset("imdb", split=["train", "test"])
+    # tokenizer = get_tokenizer("basic_english")
+
+
+    # train_data = train_data.map(
+    #     tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
+    # )
+    # test_data = test_data.map(
+    #     tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
+    # )
 
 
 
