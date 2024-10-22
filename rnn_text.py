@@ -5,13 +5,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchtext
 import tqdm
 import pandas as pd
 import os
+import scipy.io as sio
 
-from torchtext.data import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator
+# from torchtext.data import get_tokenizer
+# from torchtext.vocab import build_vocab_from_iterator
 
 # pytorch loads the IMBD data for you, but if you want to look at the raw format, you can download from here:
 # https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews
@@ -182,9 +182,12 @@ if __name__ == '__main__':
 
     max_length = 1000 #256
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+
     parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
     psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
-    folder_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data"
+    data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
     file_name = "dubin_path"
 
     df_params = pd.read_excel(parameters_path)
@@ -194,24 +197,60 @@ if __name__ == '__main__':
     parameters_data = df_params.values
     psi_end_data = df_psi.values
 
+
+    # temp_params = torch.tensor([], dtype=torch.float32).to(device)
+    # temp_psi_end = torch.tensor([], dtype=torch.float32).to(device)
+
+    params_counter = 0
+    psi_end_counter = 0
+
+    for list in parameters_data: #range(0, parameters_data.shape[0] + 1):
+        if params_counter == 0:
+            temp_params = torch.tensor(list, dtype=torch.float32).to(device)
+        else:
+            temp_params = torch.vstack((temp_params, torch.tensor(list, dtype=torch.float32).to(device)))
+        params_counter += 1
+
+    parameters_data = temp_params
+
+    for list in psi_end_data: #range(0, parameters_data.shape[0] + 1):
+        if psi_end_counter == 0:
+            temp_psi_end = torch.tensor(list, dtype=torch.float32).to(device)
+        else:
+            temp_psi_end = torch.vstack((temp_psi_end, torch.tensor(list, dtype=torch.float32).to(device)))
+        psi_end_counter += 1
+
+    psi_end_data = temp_psi_end
+    
+    
+
     # List to store the data from all files
-    dataframes = []
+    # dataframes = []
+    # paths = []
+    # paths = torch.tensor(paths, dtype=torch.float32).to(device)
 
+    df = sio.loadmat(data_path)
+    df = df['master_path']
     # Loop through all files in the folder
-    for name in os.listdir(folder_path):
-        # Check if the file contains the desired part of the name
-        if file_name in name and name.endswith('.xls'):  # Adjust extension if needed
-            # Build the full file path
-            file_path = os.path.join(folder_path, name)
-            
-            # Read the file and append the DataFrame to the list
-            df = pd.read_excel(file_path)
-            dataframes.append(df)
+    for i in range(df.shape[2]):
+        if i == 0:
+            paths = torch.tensor(df[:, :, i], dtype=torch.float32).to(device)
+        else:
+            paths = torch.vstack((paths, torch.tensor(df[:,:,i], dtype=torch.float32).to(device)))
+    train_indices = ((i + 1) * 0.8) - 1
+    val_indices = ((i + 1) * 0.2) - 1
 
+    train_paths = paths[0:train_indices]
+    val_paths = paths[train_indices + 1:val_indices]
 
+    train_params = parameters_data[0:train_indices]
+    val_params = parameters_data[train_indices + 1:val_indices]
+
+    train_psi_end = psi_end_data[0:train_indices]
+    val_psi_end = psi_end_data[train_indices + 1:val_indices]
 
     # train_data, test_data = datasets.load_dataset("imdb", split=["train", "test"])
-    # tokenizer = get_tokenizer("basic_english")
+    # # tokenizer = get_tokenizer("basic_english")
 
 
     # train_data = train_data.map(
@@ -223,47 +262,51 @@ if __name__ == '__main__':
 
 
 
-    test_size = 0.25
+    # test_size = 0.25
 
-    train_valid_data = train_data.train_test_split(test_size=test_size)
-    train_data = train_valid_data["train"]
-    valid_data = train_valid_data["test"]
-
-
-
-    min_freq = 5
-    special_tokens = ["<unk>", "<pad>"]
-
-    vocab = build_vocab_from_iterator(
-        train_data["tokens"],
-        min_freq=min_freq,
-        specials=special_tokens,
-    )
+    # train_valid_data = train_data.train_test_split(test_size=test_size)
+    # train_data = train_valid_data["train"]
+    # valid_data = train_valid_data["test"]
 
 
-    unk_index = vocab["<unk>"]
-    pad_index = vocab["<pad>"]
 
-    # any token not found in the vocabulary will be mapped to the <unk> token.
-    vocab.set_default_index(unk_index)
-    # converting each example's tokens to their corresponding numerical indices using the provided vocabulary.
-    train_data = train_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
-    valid_data = valid_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
-    test_data = test_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
-    # sets the format of the datasets to PyTorch tensors. It specifies that the columns to be converted to tensors are ids, label, and length
-    train_data = train_data.with_format(type="torch", columns=["ids", "label", "length"])
-    valid_data = valid_data.with_format(type="torch", columns=["ids", "label", "length"])
-    test_data = test_data.with_format(type="torch", columns=["ids", "label", "length"])
+    # min_freq = 5
+    # special_tokens = ["<unk>", "<pad>"]
+
+    # # vocab = build_vocab_from_iterator(
+    # #     train_data["tokens"],
+    # #     min_freq=min_freq,
+    # #     specials=special_tokens,
+    # # )
 
 
-    train_data[0]
+    # unk_index = vocab["<unk>"]
+    # pad_index = vocab["<pad>"]
 
-    batch_size = 512
+    # # any token not found in the vocabulary will be mapped to the <unk> token.
+    # vocab.set_default_index(unk_index)
+    # # converting each example's tokens to their corresponding numerical indices using the provided vocabulary.
+    # train_data = train_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
+    # valid_data = valid_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
+    # test_data = test_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
+    # # sets the format of the datasets to PyTorch tensors. It specifies that the columns to be converted to tensors are ids, label, and length
+    # train_data = train_data.with_format(type="torch", columns=["ids", "label", "length"])
+    # valid_data = valid_data.with_format(type="torch", columns=["ids", "label", "length"])
+    # test_data = test_data.with_format(type="torch", columns=["ids", "label", "length"])
 
-    train_data_loader = get_data_loader(train_data, batch_size, pad_index, shuffle=True)
-    valid_data_loader = get_data_loader(valid_data, batch_size, pad_index)
-    test_data_loader = get_data_loader(test_data, batch_size, pad_index)
 
+    # train_data[0]
+
+    # batch_size = 512
+
+    # train_data_loader = get_data_loader(train_data, batch_size, pad_index, shuffle=True)
+    # valid_data_loader = get_data_loader(valid_data, batch_size, pad_index)
+    # test_data_loader = get_data_loader(test_data, batch_size, pad_index)
+
+
+    #TODO Normalization (Mean, STD)
+
+    # Model Params
     vocab_size = len(vocab)
     embedding_dim = 300
     hidden_dim = 250 #dimension of the hidden state
@@ -283,7 +326,7 @@ if __name__ == '__main__':
     lr = 5e-4
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     criterion = criterion.to(device)
 
