@@ -1,5 +1,5 @@
 import collections
-import datasets
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -9,6 +9,8 @@ import tqdm
 import pandas as pd
 import os
 import scipy.io as sio
+# import datasets
+
 
 # from torchtext.data import get_tokenizer
 # from torchtext.vocab import build_vocab_from_iterator
@@ -185,10 +187,17 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
 
-    parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
-    psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
-    data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
+    # Will
+    parameters_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/parameters.xls"
+    psi_end_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/psi_end.xls"
+    data_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/path.mat"
     file_name = "dubin_path"
+
+    # Chase
+    # parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
+    # psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
+    # data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
+    # file_name = "dubin_path"
 
     df_params = pd.read_excel(parameters_path)
     df_psi = pd.read_excel(psi_end_path)
@@ -237,8 +246,8 @@ if __name__ == '__main__':
             paths = torch.tensor(df[:, :, i], dtype=torch.float32).to(device)
         else:
             paths = torch.vstack((paths, torch.tensor(df[:,:,i], dtype=torch.float32).to(device)))
-    train_indices = ((i + 1) * 0.8) - 1
-    val_indices = ((i + 1) * 0.2) - 1
+    train_indices = int(((i + 1) * 0.8) - 1)
+    val_indices = int(((i + 1) * 0.2) - 1)
 
     train_paths = paths[0:train_indices]
     val_paths = paths[train_indices + 1:val_indices]
@@ -248,6 +257,11 @@ if __name__ == '__main__':
 
     train_psi_end = psi_end_data[0:train_indices]
     val_psi_end = psi_end_data[train_indices + 1:val_indices]
+
+    # Normalization of paths (We don't need)
+    # normalized_train_paths = (train_paths - torch.mean(train_paths))/torch.std(train_paths)
+    # normalized_val_paths = (val_paths - torch.mean(val_paths))/torch.std(val_paths)
+
 
     # train_data, test_data = datasets.load_dataset("imdb", split=["train", "test"])
     # # tokenizer = get_tokenizer("basic_english")
@@ -281,7 +295,7 @@ if __name__ == '__main__':
 
 
     # unk_index = vocab["<unk>"]
-    # pad_index = vocab["<pad>"]
+    pad_index = 0
 
     # # any token not found in the vocabulary will be mapped to the <unk> token.
     # vocab.set_default_index(unk_index)
@@ -297,32 +311,29 @@ if __name__ == '__main__':
 
     # train_data[0]
 
-    # batch_size = 512
+    batch_size = 512
 
-    # train_data_loader = get_data_loader(train_data, batch_size, pad_index, shuffle=True)
-    # valid_data_loader = get_data_loader(valid_data, batch_size, pad_index)
-    # test_data_loader = get_data_loader(test_data, batch_size, pad_index)
-
-
-    #TODO Normalization (Mean, STD)
+    train_data_loader = get_data_loader(train_paths, batch_size, pad_index, shuffle=True)
+    valid_data_loader = get_data_loader(val_paths, batch_size, pad_index)
+    test_data_loader = get_data_loader(val_paths, batch_size, pad_index)
 
     # Model Params
-    vocab_size = len(vocab)
+    vocab_size = len(train_paths)
     embedding_dim = 300
     hidden_dim = 250 #dimension of the hidden state
-    output_dim = len(train_data.unique("label"))
+    output_dim = len(val_paths)
     n_layers = 2
     bidirectional = False
     dropout_rate = 0.5
 
     model = Multi_Layer_LSTM(vocab_size, embedding_dim,  hidden_dim, output_dim, n_layers, bidirectional, dropout_rate,  pad_index,)
 
-    print(f"The model has {count_parameters(model):,} trainable parameters")
+    # print(f"The model has {count_parameters(model):,} trainable parameters")
 
     model.apply(initialize_weights)
-    vectors = torchtext.vocab.GloVe()
-    pretrained_embedding = vectors.get_vecs_by_tokens(vocab.get_itos())
-    model.embedding.weight.data = pretrained_embedding
+    # vectors = torchtext.vocab.GloVe()
+    # pretrained_embedding = vectors.get_vecs_by_tokens(vocab.get_itos())
+    # model.embedding.weight.data = pretrained_embedding
     lr = 5e-4
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
@@ -334,7 +345,7 @@ if __name__ == '__main__':
     n_epochs = 10
     best_valid_loss = float("inf")
 
-    metrics = collections.defaultdict(list)
+    metrics = collections.defaultdict(int)
 
     for epoch in range(n_epochs):
         train_loss, train_acc = train(
@@ -383,18 +394,18 @@ if __name__ == '__main__':
 
     print(f"test_loss: {test_loss:.3f}, test_acc: {test_acc:.3f}")
 
-    text = "This film is terrible!"
+    # text = "This film is terrible!"
 
-    predict_sentiment(text, model, tokenizer, vocab, device)
+    # predict_sentiment(text, model, tokenizer, vocab, device)
 
-    text = "This film is great!"
+    # text = "This film is great!"
 
-    predict_sentiment(text, model, tokenizer, vocab, device)
-    text = "This film is not terrible, it's great!"
+    # predict_sentiment(text, model, tokenizer, vocab, device)
+    # text = "This film is not terrible, it's great!"
 
-    predict_sentiment(text, model, tokenizer, vocab, device)
+    # predict_sentiment(text, model, tokenizer, vocab, device)
 
-    text = "This film is not great, it's terrible!"
+    # text = "This film is not great, it's terrible!"
 
-    predict_sentiment(text, model, tokenizer, vocab, device)
+    # predict_sentiment(text, model, tokenizer, vocab, device)
 
