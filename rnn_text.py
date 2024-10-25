@@ -9,6 +9,9 @@ import tqdm
 import pandas as pd
 import os
 import scipy.io as sio
+from torch.utils.data import DataLoader, TensorDataset, Dataset
+import torchvision.transforms as transforms
+from torch.utils.tensorboard import SummaryWriter
 # import datasets
 
 
@@ -120,51 +123,67 @@ def get_accuracy(prediction, label):
     return accuracy
 
 
-class Multi_Layer_LSTM(nn.Module):
+class Dubin_Path_RNN(nn.Module):
     def __init__(
         self,
-        vocab_size,
-        embedding_dim,
+        input_dim,
         hidden_dim,
         output_dim,
         n_layers,
         bidirectional,
         dropout_rate,
-        pad_index,
+        trajectory_length
     ):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_index)
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, hidden_dim)
+        )
         self.lstm = nn.LSTM(
-            embedding_dim,
+            hidden_dim,
             hidden_dim,
             n_layers,
             bidirectional=bidirectional,
             dropout=dropout_rate,
-            batch_first=True,
+            batch_first=True
         )
-        self.fc = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
+        self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, ids, length):
+    def forward(self, initial_conditions, trajectory_length):
        
-        embedded = self.dropout(self.embedding(ids))
-        packed_embedded = nn.utils.rnn.pack_padded_sequence(
-            embedded, length, batch_first=True, enforce_sorted=False
-        ) # makes padding ignored by RNN
-        packed_output, (hidden, cell) = self.lstm(packed_embedded)
-        # hidden = [n layers * n directions, batch size, hidden dim]
-        # cell = [n layers * n directions, batch size, hidden dim]
-        output, output_length = nn.utils.rnn.pad_packed_sequence(packed_output)
-        # output = [batch size, seq len, hidden dim * n directions]
-        if self.lstm.bidirectional:
-            hidden = self.dropout(torch.cat([hidden[-1], hidden[-2]], dim=-1))
-            # hidden = [batch size, hidden dim * 2]
-        else:
-            hidden = self.dropout(hidden[-1])
-            # hidden = [batch size, hidden dim]
-        prediction = self.fc(hidden)
-        # prediction = [batch size, output dim]
-        return prediction
+       batch_size = initial_conditions.size(0)
+       hidden = self.fc(initial_conditions).unsqueeze(0)
+       cell = torch.zeros_like(hidden)
+
+       outputs = []
+       lstm_input = torch.zeros(batch_size, 1, hidden.size(-1))
+
+       for i in range(trajectory_length):
+           out, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
+           trajectory_point = self.output_layer(out)
+           outputs.append(trajectory_point)
+           lstm_input = out
+       return torch.cat(outputs, dim=1)
+        # embedded = self.dropout(self.embedding(ids))
+        # packed_embedded = nn.utils.rnn.pack_padded_sequence(
+        #     embedded, length, batch_first=True, enforce_sorted=False
+        # ) # makes padding ignored by RNN
+        # packed_output, (hidden, cell) = self.lstm(packed_embedded)
+        # # hidden = [n layers * n directions, batch size, hidden dim]
+        # # cell = [n layers * n directions, batch size, hidden dim]
+        # output, output_length = nn.utils.rnn.pad_packed_sequence(packed_output)
+        # # output = [batch size, seq len, hidden dim * n directions]
+        # if self.lstm.bidirectional:
+        #     hidden = self.dropout(torch.cat([hidden[-1], hidden[-2]], dim=-1))
+        #     # hidden = [batch size, hidden dim * 2]
+        # else:
+        #     hidden = self.dropout(hidden[-1])
+        #     # hidden = [batch size, hidden dim]
+        # prediction = self.fc(hidden)
+        # # prediction = [batch size, output dim]
+        # return prediction
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -180,6 +199,23 @@ def initialize_weights(m):
             elif "weight" in name:
                 nn.init.orthogonal_(param)
 
+class TrajectoryDataset(Dataset):
+    def __init__(self, initial_conditions, trajectories, train_params_mean, train_params_std, train_paths_mean, train_paths_std):
+        self.initial_conditions = initial_conditions  # Shape: (num_samples, num_params)
+        self.trajectories = trajectories  # Shape: (num_samples, 1000, 3)
+        self.params_mean = train_params_mean
+        self.params_std = train_params_std
+        self.traj_mean = train_paths_mean
+        self.traj_std = train_paths_std
+
+    def __len__(self):
+        return len(self.initial_conditions)
+
+    def __getitem__(self, idx):
+        params = (self.initial_conditions[idx] - self.params_mean) / self.params_std
+        trajectory = (self.trajectories[idx] - self.traj_mean) / self.traj_std
+        return params, trajectory #self.trajectories[idx]
+
 if __name__ == '__main__':
 
     max_length = 1000 #256
@@ -188,16 +224,16 @@ if __name__ == '__main__':
     print(device)
 
     # Will
-    parameters_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/parameters.xls"
-    psi_end_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/psi_end.xls"
-    data_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/path.mat"
-    file_name = "dubin_path"
+    # parameters_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/parameters.xls"
+    # psi_end_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/psi_end.xls"
+    # data_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/path.mat"
+    # file_name = "dubin_path"
 
     # Chase
-    # parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
-    # psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
-    # data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
-    # file_name = "dubin_path"
+    parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
+    psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
+    data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
+    file_name = "dubin_path"
 
     df_params = pd.read_excel(parameters_path)
     df_psi = pd.read_excel(psi_end_path)
@@ -205,6 +241,9 @@ if __name__ == '__main__':
     # Convert from pandas dataframe to numpy array
     parameters_data = df_params.values
     psi_end_data = df_psi.values
+
+    # remove initial position, steplength, and r_min from data
+    parameters_data = parameters_data[:, 3:7]
 
 
     # temp_params = torch.tensor([], dtype=torch.float32).to(device)
@@ -238,19 +277,27 @@ if __name__ == '__main__':
     # paths = []
     # paths = torch.tensor(paths, dtype=torch.float32).to(device)
 
+    paths = np.zeros((10000, 1000, 3)) # depth, rows, columns
+
     df = sio.loadmat(data_path)
     df = df['master_path']
     # Loop through all files in the folder
     for i in range(df.shape[2]):
         if i == 0:
-            paths = torch.tensor(df[:, :, i], dtype=torch.float32).to(device)
+            # paths = torch.tensor(df[:, :, i], dtype=torch.float32).to(device)
+            paths[i, :, :] = df[:, :, i]
         else:
-            paths = torch.vstack((paths, torch.tensor(df[:,:,i], dtype=torch.float32).to(device)))
+            # paths = torch.vstack((paths, torch.tensor(df[:,:,i], dtype=torch.float32).to(device)))
+            # paths[:, :, i] = torch.tensor(df[:, :, i], dtype = torch.float32).to(device)
+            paths[i, :, :] = df[:, :, i]
+    paths = torch.tensor(paths, dtype=torch.float32).to(device)
+    # paths = torch.stack(paths, dim=2)
+    
     train_indices = int(((i + 1) * 0.8) - 1)
     val_indices = int(((i + 1) * 0.2) - 1)
 
-    train_paths = paths[0:train_indices]
-    val_paths = paths[train_indices + 1:val_indices]
+    train_paths = paths[0:train_indices, :, :]
+    val_paths = paths[train_indices + 1:val_indices, :, :]
 
     train_params = parameters_data[0:train_indices]
     val_params = parameters_data[train_indices + 1:val_indices]
@@ -258,154 +305,202 @@ if __name__ == '__main__':
     train_psi_end = psi_end_data[0:train_indices]
     val_psi_end = psi_end_data[train_indices + 1:val_indices]
 
-    # Normalization of paths (We don't need)
-    # normalized_train_paths = (train_paths - torch.mean(train_paths))/torch.std(train_paths)
-    # normalized_val_paths = (val_paths - torch.mean(val_paths))/torch.std(val_paths)
+    train_params_mean = train_params.mean(dim=0)
+    train_params_std = train_params.std(dim=0)
 
+    train_paths_mean = train_paths.mean(dim=(0,1))
+    train_paths_std = train_paths.std(dim=(0,1))
 
-    # train_data, test_data = datasets.load_dataset("imdb", split=["train", "test"])
-    # # tokenizer = get_tokenizer("basic_english")
+    train_dataset = TrajectoryDataset(train_params, train_paths, train_params_mean, train_params_std, train_paths_mean, train_paths_std)
+    train_loader = DataLoader(train_dataset, batch_size = 32, shuffle = True)
 
-
-    # train_data = train_data.map(
-    #     tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
-    # )
-    # test_data = test_data.map(
-    #     tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
-    # )
-
-
-
-    # test_size = 0.25
-
-    # train_valid_data = train_data.train_test_split(test_size=test_size)
-    # train_data = train_valid_data["train"]
-    # valid_data = train_valid_data["test"]
-
-
-
-    # min_freq = 5
-    # special_tokens = ["<unk>", "<pad>"]
-
-    # # vocab = build_vocab_from_iterator(
-    # #     train_data["tokens"],
-    # #     min_freq=min_freq,
-    # #     specials=special_tokens,
-    # # )
-
-
-    # unk_index = vocab["<unk>"]
-    pad_index = 0
-
-    # # any token not found in the vocabulary will be mapped to the <unk> token.
-    # vocab.set_default_index(unk_index)
-    # # converting each example's tokens to their corresponding numerical indices using the provided vocabulary.
-    # train_data = train_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
-    # valid_data = valid_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
-    # test_data = test_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
-    # # sets the format of the datasets to PyTorch tensors. It specifies that the columns to be converted to tensors are ids, label, and length
-    # train_data = train_data.with_format(type="torch", columns=["ids", "label", "length"])
-    # valid_data = valid_data.with_format(type="torch", columns=["ids", "label", "length"])
-    # test_data = test_data.with_format(type="torch", columns=["ids", "label", "length"])
-
-
-    # train_data[0]
-
-    batch_size = 512
-
-    train_data_loader = get_data_loader(train_paths, batch_size, pad_index, shuffle=True)
-    valid_data_loader = get_data_loader(val_paths, batch_size, pad_index)
-    test_data_loader = get_data_loader(val_paths, batch_size, pad_index)
 
     # Model Params
-    vocab_size = len(train_paths)
-    embedding_dim = 300
-    hidden_dim = 250 #dimension of the hidden state
-    output_dim = len(val_paths)
-    n_layers = 2
+    input_size = parameters_data.shape[1]
+    hidden_dim = 128 #dimension of the hidden state
+    output_dim = 3
+    n_layers = 1
     bidirectional = False
-    dropout_rate = 0.5
+    dropout_rate = 0 #0.5
+    trajectory_length = 1000
 
-    model = Multi_Layer_LSTM(vocab_size, embedding_dim,  hidden_dim, output_dim, n_layers, bidirectional, dropout_rate,  pad_index,)
-
-    # print(f"The model has {count_parameters(model):,} trainable parameters")
+    model = Dubin_Path_RNN(input_size, hidden_dim, output_dim, n_layers, bidirectional, dropout_rate, trajectory_length)
 
     model.apply(initialize_weights)
-    # vectors = torchtext.vocab.GloVe()
-    # pretrained_embedding = vectors.get_vecs_by_tokens(vocab.get_itos())
-    # model.embedding.weight.data = pretrained_embedding
     lr = 5e-4
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    criterion = nn.MSELoss()
     model = model.to(device)
     criterion = criterion.to(device)
 
+    writer = SummaryWriter('runs/' + "One_To_Many_LSTM_RNN")
 
-    n_epochs = 10
-    best_valid_loss = float("inf")
+    num_epochs = 25
+    for epoch in range(num_epochs):
+        model.train()
+        for train_params, train_paths in train_loader:
+            predictions = model(train_params, train_paths.size(1))
 
-    metrics = collections.defaultdict(int)
+            # # Reinstate 
+            predictions = predictions * train_paths_std + train_paths_mean
+            train_paths = train_paths * train_paths_std + train_paths_mean
 
-    for epoch in range(n_epochs):
-        train_loss, train_acc = train(
-            train_data_loader, model, criterion, optimizer, device
-        )
-        valid_loss, valid_acc = evaluate(valid_data_loader, model, criterion, device)
-        metrics["train_losses"].append(train_loss)
-        metrics["train_accs"].append(train_acc)
-        metrics["valid_losses"].append(valid_loss)
-        metrics["valid_accs"].append(valid_acc)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), "lstm.pt")
-        print(f"epoch: {epoch}")
-        print(f"train_loss: {train_loss:.3f}, train_acc: {train_acc:.3f}")
-        print(f"valid_loss: {valid_loss:.3f}, valid_acc: {valid_acc:.3f}")
+            # Compute train loss
+            loss = criterion(predictions, train_paths)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        print(f'Epoch {epoch}, Loss: {loss.item()}')
+        writer.add_scalar('training loss', loss.item(), epoch)
 
 
+    # # Normalization of paths (We don't need)
+    # # normalized_train_paths = (train_paths - torch.mean(train_paths))/torch.std(train_paths)
+    # # normalized_val_paths = (val_paths - torch.mean(val_paths))/torch.std(val_paths)
 
 
-    fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(1, 1, 1)
-    ax.plot(metrics["train_losses"], label="train loss")
-    ax.plot(metrics["valid_losses"], label="valid loss")
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("loss")
-    ax.set_xticks(range(n_epochs))
-    ax.legend()
-    ax.grid()
+    # # train_data, test_data = datasets.load_dataset("imdb", split=["train", "test"])
+    # # # tokenizer = get_tokenizer("basic_english")
+
+
+    # # train_data = train_data.map(
+    # #     tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
+    # # )
+    # # test_data = test_data.map(
+    # #     tokenize_example, fn_kwargs={"tokenizer": tokenizer, "max_length": max_length}
+    # # )
 
 
 
-    fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(1, 1, 1)
-    ax.plot(metrics["train_accs"], label="train accuracy")
-    ax.plot(metrics["valid_accs"], label="valid accuracy")
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("loss")
-    ax.set_xticks(range(n_epochs))
-    ax.legend()
-    ax.grid()
+    # # test_size = 0.25
 
-    model.load_state_dict(torch.load("lstm.pt"))
+    # # train_valid_data = train_data.train_test_split(test_size=test_size)
+    # # train_data = train_valid_data["train"]
+    # # valid_data = train_valid_data["test"]
 
-    test_loss, test_acc = evaluate(test_data_loader, model, criterion, device)
 
-    print(f"test_loss: {test_loss:.3f}, test_acc: {test_acc:.3f}")
 
-    # text = "This film is terrible!"
+    # # min_freq = 5
+    # # special_tokens = ["<unk>", "<pad>"]
 
-    # predict_sentiment(text, model, tokenizer, vocab, device)
+    # # # vocab = build_vocab_from_iterator(
+    # # #     train_data["tokens"],
+    # # #     min_freq=min_freq,
+    # # #     specials=special_tokens,
+    # # # )
 
-    # text = "This film is great!"
 
-    # predict_sentiment(text, model, tokenizer, vocab, device)
-    # text = "This film is not terrible, it's great!"
+    # # unk_index = vocab["<unk>"]
+    # pad_index = 0
 
-    # predict_sentiment(text, model, tokenizer, vocab, device)
+    # # # any token not found in the vocabulary will be mapped to the <unk> token.
+    # # vocab.set_default_index(unk_index)
+    # # # converting each example's tokens to their corresponding numerical indices using the provided vocabulary.
+    # # train_data = train_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
+    # # valid_data = valid_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
+    # # test_data = test_data.map(numericalize_example, fn_kwargs={"vocab": vocab})
+    # # # sets the format of the datasets to PyTorch tensors. It specifies that the columns to be converted to tensors are ids, label, and length
+    # # train_data = train_data.with_format(type="torch", columns=["ids", "label", "length"])
+    # # valid_data = valid_data.with_format(type="torch", columns=["ids", "label", "length"])
+    # # test_data = test_data.with_format(type="torch", columns=["ids", "label", "length"])
 
-    # text = "This film is not great, it's terrible!"
 
-    # predict_sentiment(text, model, tokenizer, vocab, device)
+    # # train_data[0]
+
+    # batch_size = 512
+
+    # train_data_loader = get_data_loader(train_paths, batch_size, pad_index, shuffle=True)
+    # valid_data_loader = get_data_loader(val_paths, batch_size, pad_index)
+    # test_data_loader = get_data_loader(val_paths, batch_size, pad_index)
+
+    # # Model Params
+    # input_size = parameters_data.shape[1]
+    # hidden_dim = 250 #dimension of the hidden state
+    # output_dim = 3
+    # n_layers = 2
+    # bidirectional = False
+    # dropout_rate = 0.5
+
+    # model = Multi_Layer_LSTM(input_size, hidden_dim, output_dim, n_layers, bidirectional, dropout_rate)
+
+    # # print(f"The model has {count_parameters(model):,} trainable parameters")
+
+    # model.apply(initialize_weights)
+    # # vectors = torchtext.vocab.GloVe()
+    # # pretrained_embedding = vectors.get_vecs_by_tokens(vocab.get_itos())
+    # # model.embedding.weight.data = pretrained_embedding
+    # lr = 5e-4
+    # optimizer = optim.Adam(model.parameters(), lr=lr)
+    # criterion = nn.CrossEntropyLoss()
+    # # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model = model.to(device)
+    # criterion = criterion.to(device)
+
+
+    # n_epochs = 10
+    # best_valid_loss = float("inf")
+
+    # metrics = collections.defaultdict(int)
+
+    # for epoch in range(n_epochs):
+    #     train_loss, train_acc = train(
+    #         train_data_loader, model, criterion, optimizer, device
+    #     )
+    #     valid_loss, valid_acc = evaluate(valid_data_loader, model, criterion, device)
+    #     metrics["train_losses"].append(train_loss)
+    #     metrics["train_accs"].append(train_acc)
+    #     metrics["valid_losses"].append(valid_loss)
+    #     metrics["valid_accs"].append(valid_acc)
+    #     if valid_loss < best_valid_loss:
+    #         best_valid_loss = valid_loss
+    #         torch.save(model.state_dict(), "lstm.pt")
+    #     print(f"epoch: {epoch}")
+    #     print(f"train_loss: {train_loss:.3f}, train_acc: {train_acc:.3f}")
+    #     print(f"valid_loss: {valid_loss:.3f}, valid_acc: {valid_acc:.3f}")
+
+
+
+
+    # fig = plt.figure(figsize=(10, 6))
+    # ax = fig.add_subplot(1, 1, 1)
+    # ax.plot(metrics["train_losses"], label="train loss")
+    # ax.plot(metrics["valid_losses"], label="valid loss")
+    # ax.set_xlabel("epoch")
+    # ax.set_ylabel("loss")
+    # ax.set_xticks(range(n_epochs))
+    # ax.legend()
+    # ax.grid()
+
+
+
+    # fig = plt.figure(figsize=(10, 6))
+    # ax = fig.add_subplot(1, 1, 1)
+    # ax.plot(metrics["train_accs"], label="train accuracy")
+    # ax.plot(metrics["valid_accs"], label="valid accuracy")
+    # ax.set_xlabel("epoch")
+    # ax.set_ylabel("loss")
+    # ax.set_xticks(range(n_epochs))
+    # ax.legend()
+    # ax.grid()
+
+    # model.load_state_dict(torch.load("lstm.pt"))
+
+    # test_loss, test_acc = evaluate(test_data_loader, model, criterion, device)
+
+    # print(f"test_loss: {test_loss:.3f}, test_acc: {test_acc:.3f}")
+
+    # # text = "This film is terrible!"
+
+    # # predict_sentiment(text, model, tokenizer, vocab, device)
+
+    # # text = "This film is great!"
+
+    # # predict_sentiment(text, model, tokenizer, vocab, device)
+    # # text = "This film is not terrible, it's great!"
+
+    # # predict_sentiment(text, model, tokenizer, vocab, device)
+
+    # # text = "This film is not great, it's terrible!"
+
+    # # predict_sentiment(text, model, tokenizer, vocab, device)
 
