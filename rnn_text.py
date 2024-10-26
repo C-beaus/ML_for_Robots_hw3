@@ -138,20 +138,21 @@ class Dubin_Path_RNN(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.ReLU(),
-            nn.Linear(64, hidden_dim)
+            nn.Linear(64, output_dim)
         )
         self.lstm = nn.LSTM(
-            hidden_dim,
-            hidden_dim,
+            output_dim,
+            output_dim, # hidden_dim
             n_layers,
             bidirectional=bidirectional,
             dropout=dropout_rate,
             batch_first=True
         )
-        self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
+        # self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
+        self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else output_dim, output_dim)
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, initial_conditions, trajectory_length):
+    def forward(self, initial_conditions, ground_truth, teacher_forcing_prob):
        
        batch_size = initial_conditions.size(0)
        hidden = self.fc(initial_conditions).unsqueeze(0)
@@ -160,11 +161,17 @@ class Dubin_Path_RNN(nn.Module):
        outputs = []
        lstm_input = torch.zeros(batch_size, 1, hidden.size(-1))
 
-       for i in range(trajectory_length):
+       for i in range(ground_truth.size(1)):
            out, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
            trajectory_point = self.output_layer(out)
            outputs.append(trajectory_point)
-           lstm_input = out
+
+           use_teacher_forcing = torch.rand(1).item() < teacher_forcing_prob
+           if use_teacher_forcing and ground_truth is not None:
+                lstm_input = ground_truth[:, i, :]
+           else:
+                lstm_input = trajectory_point 
+        #    lstm_input = out
        return torch.cat(outputs, dim=1)
         # embedded = self.dropout(self.embedding(ids))
         # packed_embedded = nn.utils.rnn.pack_padded_sequence(
@@ -336,14 +343,15 @@ if __name__ == '__main__':
     writer = SummaryWriter('runs/' + "One_To_Many_LSTM_RNN")
 
     num_epochs = 25
+    teacher_forcing_prob = 1.0
     for epoch in range(num_epochs):
         model.train()
         for train_params, train_paths in train_loader:
-            predictions = model(train_params, train_paths.size(1))
+            predictions = model(train_params, train_paths, teacher_forcing_prob)
 
             # # Reinstate 
-            predictions = predictions * train_paths_std + train_paths_mean
-            train_paths = train_paths * train_paths_std + train_paths_mean
+            # predictions = predictions * train_paths_std + train_paths_mean
+            # train_paths = train_paths * train_paths_std + train_paths_mean
 
             # Compute train loss
             loss = criterion(predictions, train_paths)
