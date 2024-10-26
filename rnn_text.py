@@ -224,16 +224,16 @@ if __name__ == '__main__':
     print(device)
 
     # Will
-    # parameters_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/parameters.xls"
-    # psi_end_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/psi_end.xls"
-    # data_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/path.mat"
-    # file_name = "dubin_path"
+    parameters_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/parameters.xls"
+    psi_end_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/psi_end.xls"
+    data_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/data/path.mat"
+    file_name = "dubin_path"
 
     # Chase
-    parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
-    psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
-    data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
-    file_name = "dubin_path"
+    # parameters_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/parameters.xls"
+    # psi_end_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/psi_end.xls"
+    # data_path = "c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/data/path.mat"
+    # file_name = "dubin_path"
 
     df_params = pd.read_excel(parameters_path)
     df_psi = pd.read_excel(psi_end_path)
@@ -306,14 +306,23 @@ if __name__ == '__main__':
     val_psi_end = psi_end_data[train_indices + 1:val_indices]
 
     train_params_mean = train_params.mean(dim=0)
+    val_params_mean = val_params.mean(dim=0)
     train_params_std = train_params.std(dim=0)
+    val_params_std = val_params.std(dim=0)
 
     train_paths_mean = train_paths.mean(dim=(0,1))
     train_paths_std = train_paths.std(dim=(0,1))
+    val_paths_mean = val_paths.mean(dim=(0,1))
+    val_paths_std = val_paths.std(dim=(0,1))
+
 
     train_dataset = TrajectoryDataset(train_params, train_paths, train_params_mean, train_params_std, train_paths_mean, train_paths_std)
     train_loader = DataLoader(train_dataset, batch_size = 32, shuffle = True)
+    
+    val_dataset = TrajectoryDataset(val_params, val_paths, val_params_mean, val_params_std, val_paths_mean, val_paths_std)
+    val_loader = DataLoader(val_dataset)
 
+    print("Data Loaded")
 
     # Model Params
     input_size = parameters_data.shape[1]
@@ -335,7 +344,8 @@ if __name__ == '__main__':
 
     writer = SummaryWriter('runs/' + "One_To_Many_LSTM_RNN")
 
-    num_epochs = 25
+    #Training Loop
+    num_epochs = 3
     for epoch in range(num_epochs):
         model.train()
         for train_params, train_paths in train_loader:
@@ -353,6 +363,24 @@ if __name__ == '__main__':
         print(f'Epoch {epoch}, Loss: {loss.item()}')
         writer.add_scalar('training loss', loss.item(), epoch)
 
+
+    metrics = {"valid_losses": [], "valid_accs":[]}
+    best_valid_loss = float("inf")
+
+    
+    #Validation Loop
+    for epoch in range(num_epochs):
+        train_loss, train_acc = train(train_loader, model, criterion, optimizer, device)
+        valid_loss, valid_acc = evaluate(val_loader, model, criterion, device)
+
+        metrics["valid_losses"].append(valid_loss)
+        metrics["valid_accs"].append(valid_acc)
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            torch.save(model.state_dict(), "lstm.pt")
+        print(f"epoch: {epoch}")
+        print(f"valid_loss: {valid_loss:.3f}, valid_acc: {valid_acc:.3f}")
+    
 
     # # Normalization of paths (We don't need)
     # # normalized_train_paths = (train_paths - torch.mean(train_paths))/torch.std(train_paths)
