@@ -12,6 +12,7 @@ import scipy.io as sio
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
+import csv
 # import datasets
 
 
@@ -31,87 +32,87 @@ torch.backends.cudnn.deterministic = True
 
 
 
-def numericalize_example(example, vocab):
-    ids = vocab.lookup_indices(example["tokens"])
-    return {"ids": ids}
+# def numericalize_example(example, vocab):
+#     ids = vocab.lookup_indices(example["tokens"])
+#     return {"ids": ids}
 
-def predict_sentiment(text, model, tokenizer, vocab, device):
-    tokens = tokenizer(text)
-    ids = vocab.lookup_indices(tokens)
-    length = torch.LongTensor([len(ids)])
-    tensor = torch.LongTensor(ids).unsqueeze(dim=0).to(device)
-    prediction = model(tensor, length).squeeze(dim=0)
-    probability = torch.softmax(prediction, dim=-1)
-    predicted_class = prediction.argmax(dim=-1).item()
-    predicted_probability = probability[predicted_class].item()
-    return predicted_class, predicted_probability
-
-
-def tokenize_example(example, tokenizer, max_length):
-    tokens = tokenizer(example["text"])[:max_length]
-    length = len(tokens)
-    return {"tokens": tokens, "length": length}
-
-def get_collate_fn(pad_index):
-    def collate_fn(batch):
-        batch_ids = [i["ids"] for i in batch]
-        batch_ids = nn.utils.rnn.pad_sequence(
-            batch_ids, padding_value=pad_index, batch_first=True
-        )
-        batch_length = [i["length"] for i in batch]
-        batch_length = torch.stack(batch_length)
-        batch_label = [i["label"] for i in batch]
-        batch_label = torch.stack(batch_label)
-        batch = {"ids": batch_ids, "length": batch_length, "label": batch_label}
-        return batch
-
-    return collate_fn
-
-def get_data_loader(dataset, batch_size, pad_index, shuffle=False):
-    collate_fn = get_collate_fn(pad_index)
-    data_loader = torch.utils.data.DataLoader(
-        dataset=dataset,
-        batch_size=batch_size,
-        collate_fn=collate_fn,
-        shuffle=shuffle,
-    )
-    return data_loader
-
-def train(dataloader, model, criterion, optimizer, device):
-    model.train()
-    epoch_losses = []
-    epoch_accs = []
-    for batch in tqdm.tqdm(dataloader, desc="training..."):
-        ids = batch["ids"].to(device)
-        length = batch["length"]
-        label = batch["label"].to(device)
-        prediction = model(ids, length)
-        loss = criterion(prediction, label)
-        accuracy = get_accuracy(prediction, label)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        epoch_losses.append(loss.item())
-        epoch_accs.append(accuracy.item())
-    return np.mean(epoch_losses), np.mean(epoch_accs)
+# def predict_sentiment(text, model, tokenizer, vocab, device):
+#     tokens = tokenizer(text)
+#     ids = vocab.lookup_indices(tokens)
+#     length = torch.LongTensor([len(ids)])
+#     tensor = torch.LongTensor(ids).unsqueeze(dim=0).to(device)
+#     prediction = model(tensor, length).squeeze(dim=0)
+#     probability = torch.softmax(prediction, dim=-1)
+#     predicted_class = prediction.argmax(dim=-1).item()
+#     predicted_probability = probability[predicted_class].item()
+#     return predicted_class, predicted_probability
 
 
+# def tokenize_example(example, tokenizer, max_length):
+#     tokens = tokenizer(example["text"])[:max_length]
+#     length = len(tokens)
+#     return {"tokens": tokens, "length": length}
 
-def evaluate(dataloader, model, criterion, device):
-    model.eval()
-    epoch_losses = []
-    epoch_accs = []
-    with torch.no_grad():
-        for batch in tqdm.tqdm(dataloader, desc="evaluating..."):
-            ids = batch["ids"].to(device)
-            length = batch["length"]
-            label = batch["label"].to(device)
-            prediction = model(ids, length)
-            loss = criterion(prediction, label)
-            accuracy = get_accuracy(prediction, label)
-            epoch_losses.append(loss.item())
-            epoch_accs.append(accuracy.item())
-    return np.mean(epoch_losses), np.mean(epoch_accs)
+# def get_collate_fn(pad_index):
+#     def collate_fn(batch):
+#         batch_ids = [i["ids"] for i in batch]
+#         batch_ids = nn.utils.rnn.pad_sequence(
+#             batch_ids, padding_value=pad_index, batch_first=True
+#         )
+#         batch_length = [i["length"] for i in batch]
+#         batch_length = torch.stack(batch_length)
+#         batch_label = [i["label"] for i in batch]
+#         batch_label = torch.stack(batch_label)
+#         batch = {"ids": batch_ids, "length": batch_length, "label": batch_label}
+#         return batch
+
+#     return collate_fn
+
+# def get_data_loader(dataset, batch_size, pad_index, shuffle=False):
+#     collate_fn = get_collate_fn(pad_index)
+#     data_loader = torch.utils.data.DataLoader(
+#         dataset=dataset,
+#         batch_size=batch_size,
+#         collate_fn=collate_fn,
+#         shuffle=shuffle,
+#     )
+#     return data_loader
+
+# def train(dataloader, model, criterion, optimizer, device):
+#     model.train()
+#     epoch_losses = []
+#     epoch_accs = []
+#     for batch in tqdm.tqdm(dataloader, desc="training..."):
+#         ids = batch["ids"].to(device)
+#         length = batch["length"]
+#         label = batch["label"].to(device)
+#         prediction = model(ids, length)
+#         loss = criterion(prediction, label)
+#         accuracy = get_accuracy(prediction, label)
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+#         epoch_losses.append(loss.item())
+#         epoch_accs.append(accuracy.item())
+#     return np.mean(epoch_losses), np.mean(epoch_accs)
+
+
+
+# def evaluate(dataloader, model, criterion, device):
+#     model.eval()
+#     epoch_losses = []
+#     epoch_accs = []
+#     with torch.no_grad():
+#         for batch in tqdm.tqdm(dataloader, desc="evaluating..."):
+#             ids = batch["ids"].to(device)
+#             length = batch["length"]
+#             label = batch["label"].to(device)
+#             prediction = model(ids, length)
+#             loss = criterion(prediction, label)
+#             accuracy = get_accuracy(prediction, label)
+#             epoch_losses.append(loss.item())
+#             epoch_accs.append(accuracy.item())
+#     return np.mean(epoch_losses), np.mean(epoch_accs)
 
 
 
@@ -151,8 +152,8 @@ class Dubin_Path_RNN(nn.Module):
         self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, initial_conditions, trajectory_length):
-       
+    def forward(self, initial_conditions, traj_length):
+              
        batch_size = initial_conditions.size(0)
        hidden = self.fc(initial_conditions).unsqueeze(0)
        cell = torch.zeros_like(hidden)
@@ -160,7 +161,7 @@ class Dubin_Path_RNN(nn.Module):
        outputs = []
        lstm_input = torch.zeros(batch_size, 1, hidden.size(-1))
 
-       for i in range(trajectory_length):
+       for i in range(traj_length):
            out, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
            trajectory_point = self.output_layer(out)
            outputs.append(trajectory_point)
@@ -218,7 +219,7 @@ class TrajectoryDataset(Dataset):
 
 if __name__ == '__main__':
 
-    max_length = 1000 #256
+    max_length = 175 #256
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
@@ -277,7 +278,7 @@ if __name__ == '__main__':
     # paths = []
     # paths = torch.tensor(paths, dtype=torch.float32).to(device)
 
-    paths = np.zeros((10000, 1000, 3)) # depth, rows, columns
+    paths = np.zeros((10000, 175, 3)) # depth, rows, columns
 
     df = sio.loadmat(data_path)
     df = df['master_path']
@@ -285,25 +286,25 @@ if __name__ == '__main__':
     for i in range(df.shape[2]):
         if i == 0:
             # paths = torch.tensor(df[:, :, i], dtype=torch.float32).to(device)
-            paths[i, :, :] = df[:, :, i]
+            paths[i, :, :] = df[0:175, :, i]
         else:
             # paths = torch.vstack((paths, torch.tensor(df[:,:,i], dtype=torch.float32).to(device)))
             # paths[:, :, i] = torch.tensor(df[:, :, i], dtype = torch.float32).to(device)
-            paths[i, :, :] = df[:, :, i]
+            paths[i, :, :] = df[0:175, :, i]
     paths = torch.tensor(paths, dtype=torch.float32).to(device)
     # paths = torch.stack(paths, dim=2)
     
     train_indices = int(((i + 1) * 0.8) - 1)
-    val_indices = int(((i + 1) * 0.2) - 1)
+    # val_indices = int(((i + 1) * 0.2) - 1)
 
     train_paths = paths[0:train_indices, :, :]
-    val_paths = paths[train_indices + 1:val_indices, :, :]
+    val_paths = paths[train_indices+1:-1, :, :]
 
     train_params = parameters_data[0:train_indices]
-    val_params = parameters_data[train_indices + 1:val_indices]
+    val_params = parameters_data[train_indices + 1:]
 
     train_psi_end = psi_end_data[0:train_indices]
-    val_psi_end = psi_end_data[train_indices + 1:val_indices]
+    val_psi_end = psi_end_data[train_indices + 1:]
 
     train_params_mean = train_params.mean(dim=0)
     val_params_mean = val_params.mean(dim=0)
@@ -320,8 +321,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size = 32, shuffle = True)
     
     val_dataset = TrajectoryDataset(val_params, val_paths, val_params_mean, val_params_std, val_paths_mean, val_paths_std)
-    val_loader = DataLoader(val_dataset)
-
+    val_loader = val_dataset
     print("Data Loaded")
 
     # Model Params
@@ -331,7 +331,7 @@ if __name__ == '__main__':
     n_layers = 1
     bidirectional = False
     dropout_rate = 0 #0.5
-    trajectory_length = 1000
+    trajectory_length = 175
 
     model = Dubin_Path_RNN(input_size, hidden_dim, output_dim, n_layers, bidirectional, dropout_rate, trajectory_length)
 
@@ -344,42 +344,48 @@ if __name__ == '__main__':
 
     writer = SummaryWriter('runs/' + "One_To_Many_LSTM_RNN")
 
-    #Training Loop
-    num_epochs = 3
-    for epoch in range(num_epochs):
-        model.train()
-        for train_params, train_paths in train_loader:
-            predictions = model(train_params, train_paths.size(1))
+    file_path = "runs/run.csv"
+    with open(file_path, mode='w', newline='') as file:
+        csv_writer = csv.writer(file)
 
-            # # Reinstate 
-            predictions = predictions * train_paths_std + train_paths_mean
-            train_paths = train_paths * train_paths_std + train_paths_mean
+        #Training Loop
+        num_epochs = 50
+        print("Training...")
+        for epoch in range(num_epochs):
+            model.train()
+            for train_params, train_paths in train_loader:
+                predictions = model(train_params, train_paths.size(1))
 
-            # Compute train loss
-            loss = criterion(predictions, train_paths)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-        print(f'Epoch {epoch}, Loss: {loss.item()}')
-        writer.add_scalar('training loss', loss.item(), epoch)
+                # # Reinstate 
+                # predictions = predictions * train_paths_std + train_paths_mean
+                # train_paths = train_paths * train_paths_std + train_paths_mean
+
+                # Compute train loss
+                loss = criterion(predictions, train_paths)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+            print(f'Epoch {epoch}, Loss: {loss.item()}')
+            writer.add_scalar('training loss', loss.item(), epoch)
+        csv_writer.writerows([predictions[1, :, :].detach().numpy(),train_paths[1, :, :].numpy()])
 
 
-    metrics = {"valid_losses": [], "valid_accs":[]}
-    best_valid_loss = float("inf")
+        metrics = {"valid_losses": [], "valid_accs":[]}
+        best_valid_loss = float("inf")
 
-    
-    #Validation Loop
-    for epoch in range(num_epochs):
-        train_loss, train_acc = train(train_loader, model, criterion, optimizer, device)
-        valid_loss, valid_acc = evaluate(val_loader, model, criterion, device)
-
-        metrics["valid_losses"].append(valid_loss)
-        metrics["valid_accs"].append(valid_acc)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), "lstm.pt")
-        print(f"epoch: {epoch}")
-        print(f"valid_loss: {valid_loss:.3f}, valid_acc: {valid_acc:.3f}")
+        
+        #Validation Loop
+        print("Validating...")
+        for epoch in range(num_epochs):
+            predictions = model(val_params,val_paths.size(1))
+            valid_loss = criterion(predictions,val_paths)
+            metrics["valid_losses"].append(valid_loss)
+            if valid_loss < best_valid_loss:
+                best_valid_loss = valid_loss
+                # torch.save(model.state_dict(), "lstm.pt")
+            print(f"epoch: {epoch}")
+            print(f"valid_loss: {valid_loss:.3f}")
+        csv_writer.writerows([predictions[1,:,:].detach().numpy(), val_paths[1,:,:].numpy()])
     
 
     # # Normalization of paths (We don't need)
@@ -531,4 +537,3 @@ if __name__ == '__main__':
     # # text = "This film is not great, it's terrible!"
 
     # # predict_sentiment(text, model, tokenizer, vocab, device)
-
