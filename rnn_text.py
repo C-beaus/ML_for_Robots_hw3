@@ -12,6 +12,7 @@ import scipy.io as sio
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
+import csv
 # import datasets
 
 
@@ -142,37 +143,57 @@ class Dubin_Path_RNN(nn.Module):
         )
         self.lstm = nn.LSTM(
             output_dim,
-            output_dim, # hidden_dim
+            hidden_dim, # hidden_dim
             n_layers,
             bidirectional=bidirectional,
             dropout=dropout_rate,
             batch_first=True
         )
+        # self.lstm = nn.LSTM(
+        #     input_dim,
+        #     hidden_dim, # hidden_dim
+        #     n_layers,
+        #     bidirectional=bidirectional,
+        #     dropout=dropout_rate,
+        #     batch_first=True
+        # )
+
         # self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
-        self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else output_dim, output_dim)
+        self.output_layer = nn.Sequential(
+             nn.Linear(hidden_dim, 256),
+             nn.ReLU(),
+             nn.Linear(256, output_dim)
+        )
+
+        # self.output_layer = nn.Linear(hidden_dim * 2 if bidirectional else output_dim, output_dim)
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, initial_conditions, ground_truth, teacher_forcing_prob):
+    def forward(self, initial_conditions, ground_truth, teacher_forcing_prob, hidden_in):
        
        batch_size = initial_conditions.size(0)
-       hidden = self.fc(initial_conditions).unsqueeze(0)
-       cell = torch.zeros_like(hidden)
+       lstm_input = self.fc(initial_conditions).unsqueeze(1)
+    #    cell = torch.zeros_like(hidden)
 
        outputs = []
-       lstm_input = torch.zeros(batch_size, 1, hidden.size(-1))
+    #    lstm_input = torch.zeros(batch_size, 1, hidden.size(-1))
+    #    lstm_input = hidden
 
        for i in range(ground_truth.size(1)):
-           out, (hidden, cell) = self.lstm(lstm_input, (hidden, cell))
-           trajectory_point = self.output_layer(out)
-           outputs.append(trajectory_point)
+           out, hidden_in = self.lstm(lstm_input, hidden_in)
+           trajectory_point = self.output_layer(out.squeeze(1))
+           outputs.append(trajectory_point.unsqueeze(1))
 
            use_teacher_forcing = torch.rand(1).item() < teacher_forcing_prob
            if use_teacher_forcing and ground_truth is not None:
-                lstm_input = ground_truth[:, i, :]
+                lstm_input = ground_truth[:, i].unsqueeze(1)
            else:
-                lstm_input = trajectory_point 
+                lstm_input = trajectory_point.unsqueeze(1)
         #    lstm_input = out
        return torch.cat(outputs, dim=1)
+    
+
+
+
         # embedded = self.dropout(self.embedding(ids))
         # packed_embedded = nn.utils.rnn.pack_padded_sequence(
         #     embedded, length, batch_first=True, enforce_sorted=False
@@ -225,7 +246,7 @@ class TrajectoryDataset(Dataset):
 
 if __name__ == '__main__':
 
-    max_length = 1000 #256
+    max_length = 175 #256
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
@@ -284,7 +305,8 @@ if __name__ == '__main__':
     # paths = []
     # paths = torch.tensor(paths, dtype=torch.float32).to(device)
 
-    paths = np.zeros((10000, 1000, 3)) # depth, rows, columns
+    # paths = np.zeros((10000, 1000, 3)) # depth, rows, columns
+    paths = np.zeros((10000, 175, 3))
 
     df = sio.loadmat(data_path)
     df = df['master_path']
@@ -292,25 +314,25 @@ if __name__ == '__main__':
     for i in range(df.shape[2]):
         if i == 0:
             # paths = torch.tensor(df[:, :, i], dtype=torch.float32).to(device)
-            paths[i, :, :] = df[:, :, i]
+            paths[i, :, :] = df[0:175, :, i]
         else:
             # paths = torch.vstack((paths, torch.tensor(df[:,:,i], dtype=torch.float32).to(device)))
             # paths[:, :, i] = torch.tensor(df[:, :, i], dtype = torch.float32).to(device)
-            paths[i, :, :] = df[:, :, i]
+            paths[i, :, :] = df[0:175, :, i]
     paths = torch.tensor(paths, dtype=torch.float32).to(device)
     # paths = torch.stack(paths, dim=2)
     
     train_indices = int(((i + 1) * 0.8) - 1)
-    val_indices = int(((i + 1) * 0.2) - 1)
+    # val_indices = int(((i + 1) * 0.2) - 1)
 
     train_paths = paths[0:train_indices, :, :]
-    val_paths = paths[train_indices + 1:val_indices, :, :]
+    val_paths = paths[train_indices + 1:-1, :, :]
 
     train_params = parameters_data[0:train_indices]
-    val_params = parameters_data[train_indices + 1:val_indices]
+    val_params = parameters_data[train_indices + 1:]
 
     train_psi_end = psi_end_data[0:train_indices]
-    val_psi_end = psi_end_data[train_indices + 1:val_indices]
+    val_psi_end = psi_end_data[train_indices + 1:]
 
     train_params_mean = train_params.mean(dim=0)
     train_params_std = train_params.std(dim=0)
@@ -322,44 +344,81 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size = 32, shuffle = True)
 
 
+    val_params_mean = val_params.mean(dim=0)
+    val_params_std = val_params.std(dim=0)
+
+    val_paths_mean = val_paths.mean(dim=(0,1))
+    val_paths_std = val_paths.std(dim=(0,1))
+
+    val_dataset = TrajectoryDataset(val_params, val_paths, val_params_mean, val_params_std, val_paths_mean, val_paths_std)
+    val_loader = DataLoader(val_dataset, batch_size = val_paths.size(0), shuffle = True)
+
+
     # Model Params
     input_size = parameters_data.shape[1]
     hidden_dim = 128 #dimension of the hidden state
+    # lstm_hidden_dim = 128
     output_dim = 3
-    n_layers = 1
+    n_layers = 2
     bidirectional = False
-    dropout_rate = 0 #0.5
-    trajectory_length = 1000
+    dropout_rate = 0 #0.5\
+    trajectory_length = paths.shape[1]
 
     model = Dubin_Path_RNN(input_size, hidden_dim, output_dim, n_layers, bidirectional, dropout_rate, trajectory_length)
 
     model.apply(initialize_weights)
-    lr = 5e-4
+    lr = 1e-3
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
     model = model.to(device)
     criterion = criterion.to(device)
 
+    # Teacher forcing schedule parameters
+    initial_teacher_forcing_prob = 1.0
+    final_teacher_forcing_prob = 0.0
+    decay_rate = 0.95  # Decay rate per epoch
+
     writer = SummaryWriter('runs/' + "One_To_Many_LSTM_RNN")
 
-    num_epochs = 25
-    teacher_forcing_prob = 1.0
-    for epoch in range(num_epochs):
-        model.train()
-        for train_params, train_paths in train_loader:
-            predictions = model(train_params, train_paths, teacher_forcing_prob)
+    file_path = "runs/run.csv"
+    with open(file_path, mode='w', newline='') as file:
+        csv_writer = csv.writer(file)
 
-            # # Reinstate 
-            # predictions = predictions * train_paths_std + train_paths_mean
-            # train_paths = train_paths * train_paths_std + train_paths_mean
+        num_epochs = 50
+        # teacher_forcing_prob = 1.0
+        for epoch in range(num_epochs):
+            model.train()
+            teacher_forcing_prob = max(final_teacher_forcing_prob, initial_teacher_forcing_prob * (decay_rate ** epoch))
+            print(f'Teacher forcing prob {teacher_forcing_prob}')
 
-            # Compute train loss
-            loss = criterion(predictions, train_paths)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-        print(f'Epoch {epoch}, Loss: {loss.item()}')
-        writer.add_scalar('training loss', loss.item(), epoch)
+            for train_params, train_paths in train_loader:
+                batch_size = train_params.size(0)
+                hidden_in = (torch.zeros(n_layers, batch_size, hidden_dim),
+                    torch.zeros(n_layers, batch_size, hidden_dim))
+                predictions = model(train_params, train_paths, teacher_forcing_prob, hidden_in)
+
+                # # Reinstate 
+                # predictions = predictions * train_paths_std + train_paths_mean
+                # train_paths = train_paths * train_paths_std + train_paths_mean
+
+                # Compute train loss
+                loss = criterion(predictions, train_paths)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+            print(f'Epoch {epoch}, Loss: {loss.item()}')
+            writer.add_scalar('training loss', loss.item(), epoch)
+            with torch.no_grad():
+                for val_params, val_paths in val_loader:
+                    batch_size = val_params.size(0)
+                    hidden_in = (torch.zeros(n_layers, batch_size, hidden_dim),
+                                torch.zeros(n_layers, batch_size, hidden_dim))
+                    predictions_val = model(val_params, val_paths, teacher_forcing_prob = 0, hidden_in = hidden_in)
+                    val_loss = criterion(predictions_val, val_paths)
+                writer.add_scalar('val loss', val_loss.item(), epoch)
+                
+        csv_writer.writerows([predictions[1, :, :].detach().numpy(),train_paths[1, :, :].numpy(), predictions_val[1,:,:].detach().numpy(),val_paths[1,:,:].numpy()])
+
 
 
     # # Normalization of paths (We don't need)
