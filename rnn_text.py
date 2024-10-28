@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset, Dataset
 import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 import csv
+from mpl_toolkits.mplot3d import Axes3D
 # import datasets
 
 
@@ -361,13 +362,13 @@ if __name__ == '__main__':
     output_dim = 3
     n_layers = 2
     bidirectional = False
-    dropout_rate = 0 #0.5\
+    dropout_rate = 0.0 # 0.5
     trajectory_length = paths.shape[1]
 
     model = Dubin_Path_RNN(input_size, hidden_dim, output_dim, n_layers, bidirectional, dropout_rate, trajectory_length)
 
     model.apply(initialize_weights)
-    lr = 1e-3
+    lr = 1e-3 #1e-3
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
     model = model.to(device)
@@ -376,15 +377,22 @@ if __name__ == '__main__':
     # Teacher forcing schedule parameters
     initial_teacher_forcing_prob = 1.0
     final_teacher_forcing_prob = 0.0
-    decay_rate = 0.95  # Decay rate per epoch
+    decay_rate = 0.95 #0.95  # Decay rate per epoch
 
     writer = SummaryWriter('runs/' + "One_To_Many_LSTM_RNN")
+
+    # Create image folder
+    # Will's Path
+    # folder_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/images"
+    # Chase's Path
+    folder_path = 'c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/images'
+    os.makedirs(folder_path, exist_ok=True)
 
     file_path = "runs/run.csv"
     with open(file_path, mode='w', newline='') as file:
         csv_writer = csv.writer(file)
 
-        num_epochs = 50
+        num_epochs = 20
         # teacher_forcing_prob = 1.0
         for epoch in range(num_epochs):
             model.train()
@@ -416,10 +424,95 @@ if __name__ == '__main__':
                     predictions_val = model(val_params, val_paths, teacher_forcing_prob = 0, hidden_in = hidden_in)
                     val_loss = criterion(predictions_val, val_paths)
                 writer.add_scalar('val loss', val_loss.item(), epoch)
+            
+            if epoch == 1 | epoch == 10:
+                # Create a 3D plot
+                for d in range(10):
+                    fig = plt.figure(figsize=(10, 7))
+                    ax = fig.add_subplot(111, projection='3d')
+
+                    x_pred = predictions_val[d, :, 0].detach().numpy()  # Feature 1
+                    y_pred = predictions_val[d, :, 1].detach().numpy()  # Feature 2
+                    z_pred = predictions_val[d, :, 2].detach().numpy()  # Feature 3
+
+                    x_gtruth = val_paths[d, :, 0].numpy()  # Feature 1
+                    y_gtruth = val_paths[d, :, 1].numpy()  # Feature 2
+                    z_gtruth = val_paths[d, :, 2].numpy()  # Feature 3
+
+                    ax.plot(x_pred, y_pred, z_pred, label=f'Prediction, Depth {d+1}', marker='o')
+                    ax.plot(x_gtruth, y_gtruth, z_gtruth, label=f'Ground Truth, Depth {d+1}', marker='_')
+
+                    img_path = f'images/test_img_epoch_{epoch}_{d+1}.png'
+
+                    # Set labels
+                    ax.set_xlabel('X Axis')
+                    ax.set_ylabel('Y Axis')
+                    ax.set_zlabel('Z Axis')
+                    plt.title(f'3D Plot of Trajectory Data for Path {d+1}')
+                    plt.legend()
+                    plt.savefig(img_path)
+        
                 
         csv_writer.writerows([predictions[1, :, :].detach().numpy(),train_paths[1, :, :].numpy(), predictions_val[1,:,:].detach().numpy(),val_paths[1,:,:].numpy()])
 
+    # # Create image folder
+    # # Will's Path
+    # # folder_path = "C:/Users/willi/Documents/GitHub/ML_for_Robots_hw3/images"
+    # # Chase's Path
+    # folder_path = 'c:/Users/chase/OneDrive/Documents/Grad/ML_for_Robots/hw_3/ML_for_Robots_hw3/images'
+    # os.makedirs(folder_path, exist_ok=True)
 
+    # Create a 3D plot
+    for d in range(10):
+        fig = plt.figure(figsize=(10, 7))
+        ax = fig.add_subplot(111, projection='3d')
+
+        x_pred = predictions_val[d, :, 0].detach().numpy()  # Feature 1
+        y_pred = predictions_val[d, :, 1].detach().numpy()  # Feature 2
+        z_pred = predictions_val[d, :, 2].detach().numpy()  # Feature 3
+
+        x_gtruth = val_paths[d, :, 0].numpy()  # Feature 1
+        y_gtruth = val_paths[d, :, 1].numpy()  # Feature 2
+        z_gtruth = val_paths[d, :, 2].numpy()  # Feature 3
+
+        ax.plot(x_pred, y_pred, z_pred, label=f'Prediction, Depth {d+1}', marker='o')
+        ax.plot(x_gtruth, y_gtruth, z_gtruth, label=f'Ground Truth, Depth {d+1}', marker='_')
+
+        img_path = f'images/test_img{d+1}.png'
+
+        # Set labels
+        ax.set_xlabel('X Axis')
+        ax.set_ylabel('Y Axis')
+        ax.set_zlabel('Z Axis')
+        plt.title(f'3D Plot of Trajectory Data for Path {d+1}')
+        plt.legend()
+        plt.savefig(img_path)
+    plt.show()
+
+    # # Loop through each depth level and plot the sequence and features
+    # for d in range(10):
+    #     x_pred = predictions[d, :, 0].detach().numpy()  # Feature 1
+    #     y_pred = predictions[d, :, 1].detach().numpy()  # Feature 2
+    #     z_pred = predictions[d, :, 2].detach().numpy()  # Feature 3
+
+    #     x_gtruth = train_paths[d, :, 0].numpy()  # Feature 1
+    #     y_gtruth = train_paths[d, :, 1].numpy()  # Feature 2
+    #     z_gtruth = train_paths[d, :, 2].numpy()  # Feature 3
+
+    #     ax.plot(x_pred, y_pred, z_pred, label=f'Prediction, Depth {d+1}', marker='o')
+    #     ax.plot(x_gtruth, y_gtruth, z_gtruth, label=f'Ground Truth, Depth {d+1}', marker='_')
+
+    # img_path = 'test_img.png'
+
+    # # Set labels
+    # ax.set_xlabel('X Axis')
+    # ax.set_ylabel('Y Axis')
+    # ax.set_zlabel('Z Axis')
+    # plt.title('3D Plot of Trajectory Data')
+    # plt.legend()
+    # plt.savefig(img_path)
+    
+    # plt.show()
 
     # # Normalization of paths (We don't need)
     # # normalized_train_paths = (train_paths - torch.mean(train_paths))/torch.std(train_paths)
